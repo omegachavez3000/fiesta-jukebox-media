@@ -8,20 +8,90 @@ import requests
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
+# ---------------------------------------------------------
+# ESTADO GLOBAL DE LA COLA (Sincronizado entre PC y Celulares)
+# ---------------------------------------------------------
+PLAYLIST_QUEUE = []
+CURRENT_TRACK = None
+
 YTDL_OPTIONS = {
     'format': 'bestaudio[ext=m4a]/bestaudio/best',
     'noplaylist': True,
     'quiet': True,
     'no_warnings': True,
     'extract_flat': False,
+    'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
     'http_headers': {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
     }
 }
-# NUEVA RUTA: Sirve el archivo index.html en la raíz del sitio web
+
+# Serve el archivo index.html en la raíz
 @app.route('/')
 def serve_index():
     return send_from_directory('.', 'index.html')
+
+# ---------------------------------------------------------
+# ENDPOINTS DE LA COLA Y ESTADO
+# ---------------------------------------------------------
+
+@app.route('/api/state', methods=['GET'])
+def get_state():
+    """Obtiene el estado actual (canción reproducida + cola)."""
+    return jsonify({
+        'current_track': CURRENT_TRACK,
+        'queue': PLAYLIST_QUEUE
+    })
+
+@app.route('/api/queue', methods=['GET'])
+def get_queue():
+    """Obtiene únicamente la lista de reproducción."""
+    return jsonify(PLAYLIST_QUEUE)
+
+@app.route('/api/queue', methods=['POST'])
+def add_to_queue():
+    """Agrega una nueva canción enviada desde la PC o celular."""
+    data = request.json or {}
+    if not data.get('id'):
+        return jsonify({'error': 'Track ID is required'}), 400
+
+    track = {
+        'id': data.get('id'),
+        'title': data.get('title', 'Sin título'),
+        'artist': data.get('artist', 'Artista desconocido'),
+        'duration': data.get('duration', 0),
+        'thumbnail': data.get('thumbnail', '')
+    }
+    
+    PLAYLIST_QUEUE.append(track)
+    return jsonify({'success': True, 'queue': PLAYLIST_QUEUE})
+
+@app.route('/api/queue/next', methods=['POST'])
+def next_track():
+    """Avanza a la siguiente canción en la cola (llamado por el reproductor principal)."""
+    global CURRENT_TRACK
+    if PLAYLIST_QUEUE:
+        CURRENT_TRACK = PLAYLIST_QUEUE.pop(0)
+    else:
+        CURRENT_TRACK = None
+    return jsonify({'current_track': CURRENT_TRACK, 'queue': PLAYLIST_QUEUE})
+
+@app.route('/api/queue/delete', methods=['POST'])
+def delete_from_queue():
+    """Elimina un tema específico de la cola por su índice o ID."""
+    data = request.json or {}
+    track_id = data.get('id')
+    
+    global PLAYLIST_QUEUE
+    PLAYLIST_QUEUE = [t for t in PLAYLIST_QUEUE if t.get('id') != track_id]
+    return jsonify({'success': True, 'queue': PLAYLIST_QUEUE})
+
+# ---------------------------------------------------------
+# BÚSQUEDA Y STREAMING
+# ---------------------------------------------------------
+
 @app.route('/api/search', methods=['GET'])
 def search_songs():
     query = request.args.get('q', '')
@@ -58,7 +128,6 @@ def stream_audio():
             info = ydl.extract_info(video_url, download=False)
             stream_url = info.get('url')
             
-        # Reenviar headers de rango si el navegador solicita adelantar/retroceder
         headers = {**YTDL_OPTIONS['http_headers']}
         if 'Range' in request.headers:
             headers['Range'] = request.headers['Range']
@@ -89,5 +158,5 @@ def stream_audio():
         return str(e), 500
 
 if __name__ == '__main__':
-    print("🚀 Servidor DJ Pro (Seek + Crossfade) en http://0.0.0.0:5000")
+    print("🚀 Servidor Party Jukebox Sincronizado en http://0.0.0.0:5000")
     app.run(host='0.0.0.0', port=5000, debug=True)
