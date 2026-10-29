@@ -4,7 +4,7 @@ from flask_cors import CORS
 import yt_dlp
 import requests
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 YTDL_OPTIONS = {
@@ -17,7 +17,10 @@ YTDL_OPTIONS = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
 }
-
+# NUEVA RUTA: Sirve el archivo index.html en la raíz del sitio web
+@app.route('/')
+def serve_index():
+    return send_from_directory('.', 'index.html')
 @app.route('/api/search', methods=['GET'])
 def search_songs():
     query = request.args.get('q', '')
