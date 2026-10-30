@@ -9,10 +9,11 @@ app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 # ---------------------------------------------------------
-# ESTADO GLOBAL DE LA COLA (Sincronizado entre PC y Celulares)
+# ESTADO GLOBAL Y CACHÉ DE STREAMING (Cero retraso de carga)
 # ---------------------------------------------------------
 PLAYLIST_QUEUE = []
 CURRENT_TRACK = None
+STREAM_CACHE = {}  # Caché para almacenar URLs directas y evitar re-ejecutar yt-dlp
 
 YTDL_OPTIONS = {
     'format': 'bestaudio[ext=m4a]/bestaudio/best',
@@ -28,7 +29,7 @@ YTDL_OPTIONS = {
     }
 }
 
-# Serve el archivo index.html en la raíz
+# Sirve el archivo index.html en la raíz
 @app.route('/')
 def serve_index():
     return send_from_directory('.', 'index.html')
@@ -36,6 +37,17 @@ def serve_index():
 # ---------------------------------------------------------
 # ENDPOINTS DE LA COLA Y ESTADO
 # ---------------------------------------------------------
+@app.route('/api/queue/select', methods=['POST'])
+def select_from_queue():
+    """Selecciona un tema de la cola por su índice y lo pone a sonar."""
+    global CURRENT_TRACK, PLAYLIST_QUEUE
+    data = request.json or {}
+    index = data.get('index')
+    
+    if index is not None and 0 <= index < len(PLAYLIST_QUEUE):
+        CURRENT_TRACK = PLAYLIST_QUEUE.pop(index)
+        
+    return jsonify({'current_track': CURRENT_TRACK, 'queue': PLAYLIST_QUEUE})
 
 @app.route('/api/state', methods=['GET'])
 def get_state():
@@ -49,18 +61,7 @@ def get_state():
 def get_queue():
     """Obtiene únicamente la lista de reproducción."""
     return jsonify(PLAYLIST_QUEUE)
-@app.route('/api/queue/select', methods=['POST'])
-def select_from_queue():
-    """Selecciona un tema de la cola por su índice y lo pone a sonar."""
-    global CURRENT_TRACK, PLAYLIST_QUEUE
-    data = request.json or {}
-    index = data.get('index')
-    
-    if index is not None and 0 <= index < len(PLAYLIST_QUEUE):
-        # Sacamos la canción de la posición y la establecemos como actual
-        CURRENT_TRACK = PLAYLIST_QUEUE.pop(index)
-        
-    return jsonify({'current_track': CURRENT_TRACK, 'queue': PLAYLIST_QUEUE})
+
 @app.route('/api/queue', methods=['POST'])
 def add_to_queue():
     """Agrega una nueva canción enviada desde la PC o celular."""
@@ -81,7 +82,7 @@ def add_to_queue():
 
 @app.route('/api/queue/next', methods=['POST'])
 def next_track():
-    """Avanza a la siguiente canción en la cola (llamado por el reproductor principal)."""
+    """Avanza a la siguiente canción en la cola."""
     global CURRENT_TRACK
     if PLAYLIST_QUEUE:
         CURRENT_TRACK = PLAYLIST_QUEUE.pop(0)
@@ -91,7 +92,7 @@ def next_track():
 
 @app.route('/api/queue/delete', methods=['POST'])
 def delete_from_queue():
-    """Elimina un tema específico de la cola por su índice o ID."""
+    """Elimina un tema específico de la cola por su ID."""
     data = request.json or {}
     track_id = data.get('id')
     
@@ -100,7 +101,7 @@ def delete_from_queue():
     return jsonify({'success': True, 'queue': PLAYLIST_QUEUE})
 
 # ---------------------------------------------------------
-# BÚSQUEDA Y STREAMING
+# BÚSQUEDA Y STREAMING OPTIMIZADO CON CACHÉ
 # ---------------------------------------------------------
 
 @app.route('/api/search', methods=['GET'])
@@ -134,10 +135,16 @@ def stream_audio():
         return "No ID provided", 400
 
     video_url = f"https://www.youtube.com/watch?v={video_id}"
+    
     try:
-        with yt_dlp.YoutubeDL(YTDL_OPTIONS) as ydl:
-            info = ydl.extract_info(video_url, download=False)
-            stream_url = info.get('url')
+        # Usar caché si ya tenemos la URL directa del stream para este video_id
+        if video_id in STREAM_CACHE:
+            stream_url = STREAM_CACHE[video_id]
+        else:
+            with yt_dlp.YoutubeDL(YTDL_OPTIONS) as ydl:
+                info = ydl.extract_info(video_url, download=False)
+                stream_url = info.get('url')
+                STREAM_CACHE[video_id] = stream_url
             
         headers = {**YTDL_OPTIONS['http_headers']}
         if 'Range' in request.headers:
@@ -145,6 +152,14 @@ def stream_audio():
 
         req = requests.get(stream_url, headers=headers, stream=True)
         
+        # Si la URL cacheada expiró (error 403), la borramos del caché y reintentamos una vez
+        if req.status_code == 403:
+            with yt_dlp.YoutubeDL(YTDL_OPTIONS) as ydl:
+                info = ydl.extract_info(video_url, download=False)
+                stream_url = info.get('url')
+                STREAM_CACHE[video_id] = stream_url
+            req = requests.get(stream_url, headers=headers, stream=True)
+
         response_headers = {
             'Content-Type': req.headers.get('content-type', 'audio/m4a'),
             'Accept-Ranges': 'bytes',
@@ -166,8 +181,11 @@ def stream_audio():
 
     except Exception as e:
         print(f"Error haciendo streaming: {e}")
+        # Limpiar caché en caso de error crítico
+        if video_id in STREAM_CACHE:
+            del STREAM_CACHE[video_id]
         return str(e), 500
 
 if __name__ == '__main__':
-    print("🚀 Servidor Party Jukebox Sincronizado en http://0.0.0.0:5000")
+    print("🚀 Servidor Party Jukebox Sincronizado y Optimizado en http://0.0.0.0:5000")
     app.run(host='0.0.0.0', port=5000, debug=True)
