@@ -49,7 +49,18 @@ def get_state():
 def get_queue():
     """Obtiene únicamente la lista de reproducción."""
     return jsonify(PLAYLIST_QUEUE)
-
+@app.route('/api/queue/select', methods=['POST'])
+def select_from_queue():
+    """Selecciona un tema de la cola por su índice y lo pone a sonar."""
+    global CURRENT_TRACK, PLAYLIST_QUEUE
+    data = request.json or {}
+    index = data.get('index')
+    
+    if index is not None and 0 <= index < len(PLAYLIST_QUEUE):
+        # Sacamos la canción de la posición y la establecemos como actual
+        CURRENT_TRACK = PLAYLIST_QUEUE.pop(index)
+        
+    return jsonify({'current_track': CURRENT_TRACK, 'queue': PLAYLIST_QUEUE})
 @app.route('/api/queue', methods=['POST'])
 def add_to_queue():
     """Agrega una nueva canción enviada desde la PC o celular."""
