@@ -143,6 +143,15 @@
                     <p class="text-slate-400 italic">Prepara la voz para cantar...</p>
                 </div>
             </div>
+            <!-- Derecha: Contenedor del Video de YouTube + Botón Maximizar -->
+    <div id="videoContainer" class="relative w-full lg:w-96 h-80 md:h-96 bg-black rounded-3xl overflow-hidden border border-indigo-500/40 shadow-2xl flex flex-col transition-all duration-300">
+        <div class="absolute top-2 right-2 z-20">
+            <button onclick="toggleMaximizeVideo()" class="bg-black/60 hover:bg-black/80 text-white p-2 rounded-full backdrop-blur-md border border-white/20 text-xs transition">
+                <i id="maxIcon" class="fas fa-expand"></i>
+            </button>
+        </div>
+        <iframe id="stageVideoFrame" class="w-full h-full pointer-events-none" src="" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+    </div>
         </div>
 
         <div class="relative z-10 w-full max-w-4xl h-20 flex flex-col items-center justify-end">
@@ -430,7 +439,9 @@
     document.getElementById('stageTitle').innerText = song.title;
     document.getElementById('stageArtist').innerText = song.artist;
     document.getElementById('stageThumb').src = song.thumbnail;
-
+            // Actualizar el video de YouTube en el modo Stage (silenciado para no hacer eco con el Deck de audio)
+    const videoFrame = document.getElementById('stageVideoFrame');
+    videoFrame.src = `https://www.youtube.com/embed/${song.id}?autoplay=1&mute=1&controls=0&disablekb=1&modestbranding=1`;
     fetchLyrics(song.title, song.artist);
 
     // Asignamos la nueva canción al deck en espera
@@ -471,46 +482,65 @@
         console.error("Error al iniciar reproducción del deck:", e);
     });
 }
+            let isVideoMaximized = false;
+function toggleMaximizeVideo() {
+    const videoContainer = document.getElementById('videoContainer');
+    const lyricsPanel = document.getElementById('lyricsPanel');
+    const maxIcon = document.getElementById('maxIcon');
 
+    isVideoMaximized = !isVideoMaximized;
+    if (isVideoMaximized) {
+        lyricsPanel.classList.add('hidden');
+        videoContainer.classList.remove('lg:w-96', 'h-80', 'md:h-96');
+        videoContainer.classList.add('w-full', 'h-[75vh]', 'max-w-4xl');
+        maxIcon.className = "fas fa-compress";
+    } else {
+        lyricsPanel.classList.remove('hidden');
+        videoContainer.classList.remove('w-full', 'h-[75vh]', 'max-w-4xl');
+        videoContainer.classList.add('lg:w-96', 'h-80', 'md:h-96');
+        maxIcon.className = "fas fa-expand";
+    }
+}
         // Función para reproducir al hacer clic en cualquier elemento de la cola
-async function playFromQueue(index) {
-    try {
-        const res = await fetch(`${API_URL}/queue`);
-        const queue = await res.json();
-        
-        if (queue && queue.length > index) {
-            // Extraemos la canción seleccionada y enviamos una petición para actualizar el estado actual en el servidor
-            const selectedSong = queue[index];
-            
-            // Opcional: la removemos de la cola en el servidor y la ponemos como actual
-            await fetch(`${API_URL}/queue/select`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ index: index })
-            });
-            syncState();
-        }
-    } catch (e) {
-        console.error("Error al reproducir desde la cola:", e);
-    }
-}
+            async function playFromQueue(index) {
+                try {
+                    const res = await fetch(`${API_URL}/queue`);
+                    const queue = await res.json();
+                    
+                    if (queue && queue.length > index) {
+                        // Extraemos la canción seleccionada y enviamos una petición para actualizar el estado actual en el servidor
+                        const selectedSong = queue[index];
+                        
+                        // Opcional: la removemos de la cola en el servidor y la ponemos como actual
+                        await fetch(`${API_URL}/queue/select`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ index: index })
+                        });
+                        syncState();
+                    }
+                } catch (e) {
+                    console.error("Error al reproducir desde la cola:", e);
+                }
+            }
 
-// Renderizado de la cola con la opción de clic habilitada de nuevo
-function renderQueue(queue) {
-    const container = document.getElementById('queueList');
-    if(!queue || queue.length === 0) {
-        container.innerHTML = '<p class="text-sm text-slate-500 text-center py-4">La cola está vacía.</p>';
-        return;
-    }
-    container.innerHTML = queue.map((s, idx) => `
-        <div onclick="playFromQueue(${idx})" class="flex items-center justify-between p-3 bg-slate-800/40 hover:bg-indigo-900/40 cursor-pointer rounded-xl text-sm transition border border-transparent hover:border-indigo-500/30">
-            <span class="font-bold text-indigo-400 w-6">${idx + 1}.</span>
-            <span class="flex-1 truncate">${s.title}</span>
-            <span class="text-xs text-slate-400 ml-2">${s.artist}</span>
-            <span class="text-xs text-indigo-300 ml-4 font-bold"><i class="fas fa-play"></i> Reproducir</span>
-        </div>
-    `).join('');
-}
+            // Renderizado de la cola con la opción de clic habilitada de nuevo
+            function renderQueue(queue) {
+                const container = document.getElementById('queueList');
+                if(!queue || queue.length === 0) {
+                    container.innerHTML = '<p class="text-sm text-slate-500 text-center py-4">La cola está vacía.</p>';
+                    return;
+                }
+                container.innerHTML = queue.map((s, idx) => `
+                    <div onclick="playFromQueue(${idx})" class="flex items-center justify-between p-3 bg-slate-800/40 hover:bg-indigo-900/40 cursor-pointer rounded-xl text-sm transition border border-transparent hover:border-indigo-500/30">
+                        <span class="font-bold text-indigo-400 w-6">${idx + 1}.</span>
+                        <span class="flex-1 truncate">${s.title}</span>
+                        <span class="text-xs text-slate-400 ml-2">${s.artist}</span>
+                        <span class="text-xs text-indigo-300 ml-4 font-bold"><i class="fas fa-play"></i> Reproducir</span>
+                    </div>
+                `).join('');
+            }
+
         function toggleStageMode() {
             const stage = document.getElementById('stageOverlay');
             if (stage.classList.contains('hidden')) {
