@@ -423,46 +423,54 @@
         }
 
         function playTrackOnPlayer(song) {
-            document.getElementById('currentTitle').innerText = song.title;
-            document.getElementById('currentArtist').innerText = song.artist;
-            document.getElementById('currentThumb').src = song.thumbnail;
+    document.getElementById('currentTitle').innerText = song.title;
+    document.getElementById('currentArtist').innerText = song.artist;
+    document.getElementById('currentThumb').src = song.thumbnail;
 
-            document.getElementById('stageTitle').innerText = song.title;
-            document.getElementById('stageArtist').innerText = song.artist;
-            document.getElementById('stageThumb').src = song.thumbnail;
+    document.getElementById('stageTitle').innerText = song.title;
+    document.getElementById('stageArtist').innerText = song.artist;
+    document.getElementById('stageThumb').src = song.thumbnail;
 
-            fetchLyrics(song.title, song.artist);
+    fetchLyrics(song.title, song.artist);
 
-            standbyDeck.src = `${API_URL}/stream?id=${song.id}`;
-            standbyDeck.load();
+    // Asignamos la nueva canción al deck en espera
+    standbyDeck.src = `${API_URL}/stream?id=${song.id}`;
+    standbyDeck.load();
 
-            if(!isAudioSetup) initWebAudio();
+    if(!isAudioSetup) initWebAudio();
 
-            const oldDeck = activeDeck;
-            const newDeck = standbyDeck;
-            const oldGain = (oldDeck === deckA) ? gainA : gainB;
-            const newGain = (newDeck === deckA) ? gainA : gainB;
+    const oldDeck = activeDeck;
+    const newDeck = standbyDeck;
+    const oldGain = (oldDeck === deckA) ? gainA : gainB;
+    const newGain = (newDeck === deckA) ? gainA : gainB;
 
+    // 1. Ponemos el volumen del deck nuevo en 0 para que cargue en silencio
+    newGain.gain.setValueAtTime(0, audioCtx.currentTime);
+    oldGain.gain.setValueAtTime(1, audioCtx.currentTime); // La actual sigue sonando al 100%
+
+    // 2. Reproducimos el deck nuevo (comienza a hacer búfer sin cortar la música actual)
+    newDeck.play().then(() => {
+        // 3. TAN PRONTO como el deck nuevo arranca, ejecutamos el crossfade suave (ej. 1.5 segundos)
+        const fadeDuration = 1.5;
+        const startTime = audioCtx.currentTime;
+
+        newGain.gain.linearRampToValueAtTime(1, startTime + fadeDuration); // Sube la nueva
+        oldGain.gain.linearRampToValueAtTime(0, startTime + fadeDuration); // Baja la anterior
+
+        // Cambiamos los roles de los decks al terminar la transición
+        setTimeout(() => {
             activeDeck = newDeck;
             standbyDeck = oldDeck;
             delete activeDeck.dataset.transitioning;
+            
+            oldDeck.pause();
+            oldDeck.src = "";
+        }, fadeDuration * 1000);
 
-            newGain.gain.setValueAtTime(0, audioCtx.currentTime);
-            newDeck.play();
-
-            if(audioCtx) {
-                newGain.gain.linearRampToValueAtTime(1, audioCtx.currentTime + 1.5);
-                if(oldDeck.src) {
-                    oldGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1.5);
-                    setTimeout(() => {
-                        oldDeck.pause();
-                        oldDeck.src = "";
-                    }, 1500);
-                }
-            } else {
-                newDeck.volume = 1;
-            }
-        }
+    }).catch(e => {
+        console.error("Error al iniciar reproducción del deck:", e);
+    });
+}
 
         // Función para reproducir al hacer clic en cualquier elemento de la cola
 async function playFromQueue(index) {
